@@ -1,0 +1,162 @@
+---
+title: "STAT 345 Midterm Project"
+date: "Due April 3"
+name: "Zachary Schiffer"
+output:
+  html_document: default
+  pdf_document: default
+font: 12pt
+---
+
+> "NOBODY KNOWS ANYTHING. Not one person in the entire motion picture field knows for a certainty what’s going to work. Every time out it’s a guess—and, if you’re lucky, an educated one." William Goldman, _Adventures in the Screen Trade_
+
+Your data for the midterm project consists of the 1000 highest rated movies on the Internet Movie Database (IMDB). You can find the first 50 movies [here](https://www.imdb.com/search/title/?groups=top_1000&start=1), with navigational links to the other 950 movies.
+
+Each IMDB page records a large amount of information about each movie. We are interested in the following:
+
+   * The average rating of the movie by IMDB users. 
+   * The number of ratings of the movie. 
+   * The year the movie was released. 
+   * The gross revenue of the movie (US).
+   * The budget for the movie.
+   * The movie's title.
+   * The movie’s genre(s). 
+   * The four top-billed actors.
+   * The text of the 25 "most helpful" reviews, as well as their helpfulness (ratio of helpful votes out of total votes.) 
+    
+Note that the first five (and last) variables are numeric, and the genre, title, and reviews are strings. In some cases, some of these variables may be missing for a particular movie.
+
+In some cases, the business information page lists multiple gross revenues, depending on the country, or gross receipts by different dates. In case of ambiguity, we are interested in gross receipts for the US, and want to use the figure for the latest available date. If no gross revenue figure is available for the US, treat the gross revenue as missing.
+
+**General advice:** Get started on this one early. If you wait to the last minute, it will not go well.
+
+1. (30 pts) Write code to extract the variables described above from all 1000 movies, and store it in a data frame. For full credit, you should write a function which can extract this information from an arbitrary movie code (or url), and then further code which uses that function and applies it to all 1000 movies. For full credit, your code should avoid loops in favor of vectorized operations and apply (and sapply, lapply, etc., as convenient). Your code should handle missing values appropriately, and should not convert categorical variables into numbers, or numbers into strings, etc. 
+
+_Victory conditions:_ You have a data frame with 1000 rows and columns that contain the first six variables, as well as each genre, review, and review helpfulness scores in appropriately formatted columns. Columns have short but clear names. Most rows have no missing values; the few rows where there are missing values have NA in the appropriate places. 
+
+_Mercy condition:_ If you are struggling to get these data in a reasonable form, a compiled, reasonably clean and accurate version for either the URL list or movie data will be added to Canvas called `imdb_urls.csv` and `moviedata.Rdata` respectively.  Use them to answer the following parts, if necessary. Your work in this part, even if not complete, can be scored for partial credit.
+```{r}
+library(rvest)
+library(tidyverse)
+url <- "https://www.imdb.com/search/title/?groups=top_1000&start=1"
+h <- read_html(url)
+title_nodes <- h %>% html_nodes(".lister-item-header a")
+titles <- html_text(title_nodes)
+title_urls <- html_attr(title_nodes, "href")
+title_urls_clean <- str_replace(title_urls, "\\?ref_=adv_li_tt", "")
+indv_films <- str_c("https://www.imdb.com", title_urls_clean, sep="")
+indv_film_reviews <- str_c(indv_films, "reviews", sep="")
+film_url <- read_html(indv_films[5])
+```
+
+```{r}
+get_film_data <- function(indv_urls, indv_url_reviews){
+   indv_films <- read_html(indv_urls)
+   indv_film_reviews <- read_html(indv_url_reviews)
+rating <- indv_films %>% html_nodes("strong span") %>% html_text() %>% parse_number()
+votes <- indv_films %>% html_nodes("#title-overview-widget .small") %>% html_text() %>% .[2] %>% parse_number()
+year <- indv_films %>% html_nodes("#titleYear") %>% html_text() %>% parse_number
+genre <- indv_films %>% html_nodes(".txt-block~ .canwrap a") %>% html_text(., trim = TRUE) %>% str_c(., collapse = ", ")
+gross <- indv_films %>% html_nodes(".txt-block:nth-child(14)") %>% html_text() %>% parse_number()
+if(length(gross)==0) gross <- NA
+budget <- indv_films %>% html_nodes("#titleDetails .txt-block:nth-child(12)") %>% html_text() %>% parse_number()
+if(length(budget)==0) budget <- NA
+stars <- indv_films %>% html_nodes(".primary_photo+ td a") %>% html_text(., trim = TRUE) %>% .[1:4] %>% str_c(., sep = ",", collapse = ",")
+reviews <- indv_film_reviews %>% html_nodes(".text") %>% html_text()
+numerator <- read_html(indv_url_reviews) %>% html_nodes(".text-muted") %>% str_split(., "out of", simplify = TRUE) %>% .[,1] %>% str_split(., "\\n", simplify = TRUE) %>% .[,2]
+denominator <- read_html(indv_url_reviews) %>% html_nodes(".text-muted") %>% str_split(., "out of", simplify = TRUE) %>% .[,2] %>% str_split(., "\\n", simplify = TRUE) %>% .[,1]
+numerator <- parse_number(numerator)
+denominator <- parse_number(denominator)
+actual_ratio <- numerator / denominator
+percentage <- data.frame(t(100 * (actual_ratio)))
+#names(percentage) <- c()
+return(data.frame(rating = rating, votes = votes, year = year, genre = genre, stars = stars, gross = gross, budget = budget, percentage))
+}
+```
+
+
+```{r}
+a <- get_film_data(indv_films[2], indv_film_reviews[2])
+indv_urls <- indv_films[1]
+indv_url_reviews <- indv_film_reviews[1]
+
+b <- map2_df(.x = indv_films[1:20], .y = indv_film_reviews[1:20], .f = get_film_data)
+
+numerator <- read_html(indv_url_reviews) %>% html_nodes(".text-muted") %>% str_split(., "out of", simplify = TRUE) %>% .[,1] %>% str_split(., "\\n", simplify = TRUE) %>% .[,2]
+denominator <- read_html(indv_url_reviews) %>% html_nodes(".text-muted") %>% str_split(., "out of", simplify = TRUE) %>% .[,2] %>% str_split(., "\\n", simplify = TRUE) %>% .[,1]
+numerator <- parse_number(numerator)
+denominator <- parse_number(denominator)
+actual_ratio <- numerator / denominator
+percentage <- 100 * (actual_ratio)
+```
+
+2. (30 pts) Write code to plot the distributions of the first five variables listed above. Make sure missing values, if any, are handled gracefully. Your plots should be appropriately labeled, titled, colored, etc. Comment on the features each plot presents -- what information is gained by seeing these graphics?
+
+```{r}
+#Year of Release
+moviedata %>% ggplot(aes(year)) + geom_bar() + xlab("Year of Realease") + ylab("Number of Films") + ggtitle("Number of Most Popular Films by Year of Release")
+```
+This graph shows how many films from each year are on the list of most popular movies. Most of the films on the list are from the last few decades or so. This can be attributed to improvements in film making as a whole, but also simply because there are more people familiar with the movies that were released most recently. 
+```{r}
+#Rating
+moviedata %>% ggplot(aes(rating)) + geom_bar() + xlab("Rating (out of 10)") + ylab("Number of Films") + ggtitle("Number of Films with a Given Rating Score")
+```
+This graphic shows the distribution of the rating scores of all movies on the list. A majority of the films have ratings between 7.5 and 8.1, with very few films scoring a 9 or higher. This alludes to a harsh critiquing system in which even the most popular films of all time still only average a score of around 8 out of 10. 
+```{r}
+#Quantity of Ratings
+moviedata %>% ggplot(aes(num_ratings)) + geom_histogram() + xlab("Number of Reviews (per film)") + ylab("Number of Films") + ggtitle("Number of Reviews given to a Film")
+```
+
+```{r}
+#Budget Graphics
+moviedata %>% ggplot(aes(budget)) + geom_histogram() + xlim(0, 1e+8) + ylim(0, 150) + xlab("Budget") +ylab("Number of Films") +ggtitle("Film Budget (USD)")
+moviedata %>% ggplot(aes(budget)) + geom_histogram() + xlab("Budget") + ylab("Number of Films") + ggtitle("Film Budget (USD)")
+```
+Provided are two graphics to show the distribution of the films' budgets. 
+```{r}
+#Gross Graphics
+moviedata %>% ggplot(aes(gross)) + geom_histogram() + xlab("Gross") + ylab("Number of Films") + ggtitle("Gross Revenue (USD)") 
+```
+
+
+3. (20 pts) Complete a sentiment analyses on the 25 most helpful reviews for each movie. The choice of lexicon is up to you, but explain your reasons why your choice is the most reasonable/appropriate option. Add a summary of this information to your original data frame.
+
+```{r}
+library(tidyverse)
+library(scales)
+library(tidytext)
+library(textdata)
+sent <- get_sentiments("loughran")
+sent$value <- ifelse(sent$sentiment == "negative", -1, 1)
+example <- function(i){
+   words <- moviedata[i, ] %>% unnest_tokens(word, Review_15, token = "words") %>%
+   filter(!word %in% stop_words$word) %>% left_join(sent, by="word") 
+   avg_sent <- (sum(words$value, na.rm = TRUE) / length(words$value))
+   #return(data.frame(lengths=length(words)))
+   return(avg_sent)
+}
+data15 <- map(.x = 1:999, .f = example) %>% unlist()
+review_ratios <- bind_cols(moviedata, data1, data2, data3, data4, data5, data6, data7, data8, data9, data10, data11, data12, data13, data14, data15)
+```
+
+4. (20 pts) Variable Relationships. Create one plot that displays the relationship (or lack thereof) between any of the movie variables. Your plot should be appropriately labeled, titled, colored, etc. Your plot should display at minimum 3 variables. A plot with more variables included will be scored more favorably (as long as the plot is reasonable and legible). Reviews and helpfulness/sentiment scores are considered aggregate variables (e.g., 25 helpfulness scores will be considered a single variable). Some questions that you might consider when creating your plot are below, though you are not limited to these questions. 
+   - Is there any evidence of a relationship between review helpfulness and review sentiment? 
+   - Do the review scores (from the most helpful reviews) generally agree with the overall IMDB average rating?
+   - Is there evidence of a relationship between average IMDB rating and a movie's gross? Does release year seem to have an effect on this relationship?
+   - Is there evidence of a relationship between a movie's budget and a movie's gross? Does release year seem to have an effect on this relationship? 
+   - Do any actors have an effect (positive or negative) on the relationship between budget, gross, or average IMDB rating? Is this pattern common across any genres?
+
+```{r}
+library(RColorBrewer)
+ggplot(moviedata, aes(gross, rating)) + geom_point(aes(col=year), position = "dodge") + xlab("Gross Revenue") + ylab("Average Rating") + ggtitle("Gross Revenue Compared to Rating and Year of Release") + theme_classic() + scale_color_gradient2(low = "", high = "red")
+
+```
+
+  
+  
+  
+  
+  
+  
+
+
